@@ -1,0 +1,48 @@
+# Local development stack: Postgres + Redis + the API.
+# The free-tier cloud equivalents are Neon/Supabase and Upstash.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vox
+      POSTGRES_PASSWORD: vox
+      POSTGRES_DB: vox
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vox"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      args:
+        INSTALL_VOICE: "false"
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vox:vox@db:5432/vox
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: development
+      LOG_JSON: "false"
+    ports: ["8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes: ["./:/app"]
+
+volumes:
+  pgdata:

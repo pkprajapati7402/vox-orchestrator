@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local data
+*.sqlite3
+*.db
+data/local/
+audio_out/
+
+# Eval output (baseline report is committed explicitly)
+eval/reports/*
+!eval/reports/.gitkeep
+!eval/reports/baseline.md
+!eval/reports/baseline.json
+!eval/reports/loose-prompt-vs-baseline.md
+
+# Logs
+*.log
+logs/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

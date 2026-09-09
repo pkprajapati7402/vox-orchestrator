@@ -1,0 +1,85 @@
+name: Deploy
+
+# Deploys on merge to main once CI is green.
+# Configure ONE of the two paths below by setting the matching repository secrets:
+#   Koyeb      -> KOYEB_API_TOKEN, KOYEB_SERVICE
+#   Cloud Run  -> GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, GCP_PROJECT_ID, GCP_REGION
+# Steps are skipped automatically when their secrets are absent, so a fork
+# without credentials still passes.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy-koyeb:
+    name: Koyeb
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip if unconfigured
+        id: guard
+        run: |
+          if [ -z "${{ secrets.KOYEB_API_TOKEN }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "KOYEB_API_TOKEN is not set — skipping Koyeb deploy."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install the Koyeb CLI
+        if: steps.guard.outputs.configured == 'true'
+        run: curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.sh | sh
+      - name: Redeploy the service
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          KOYEB_TOKEN: ${{ secrets.KOYEB_API_TOKEN }}
+        run: |
+          export PATH="$HOME/.koyeb/bin:$PATH"
+          koyeb service redeploy "${{ secrets.KOYEB_SERVICE }}" --token "$KOYEB_TOKEN"
+
+  deploy-cloud-run:
+    name: Google Cloud Run
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip if unconfigured
+        id: guard
+        run: |
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "GCP secrets are not set — skipping Cloud Run deploy."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: google-github-actions/auth@v2
+        if: steps.guard.outputs.configured == 'true'
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.guard.outputs.configured == 'true'
+      - name: Build and deploy
+        if: steps.guard.outputs.configured == 'true'
+        run: |
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/vox/vox-orchestrator:${{ github.sha }}"
+          gcloud auth configure-docker "${{ secrets.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          gcloud run deploy vox-orchestrator \
+            --image "$IMAGE" \
+            --region "${{ secrets.GCP_REGION }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 1 \
+            --timeout 900 \
+            --set-env-vars "APP_ENV=production"
